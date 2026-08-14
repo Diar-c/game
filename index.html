@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Игровой чат на Firebase</title>
+  <title>Игровой чат с друзьями и звонками</title>
   <style>
+    /* Твои стили (оставь как были) + новые стили для панелей */
     body {
       margin: 0;
       font-family: Arial, sans-serif;
@@ -14,76 +15,138 @@
       background: #1e1e2f;
       color: #fff;
     }
-    #gameArea {
-      flex: 1;
-      position: relative;
+    #authPanel {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
       background: #2a2a3d;
-      overflow: hidden;
-    }
-    canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-    #chatPanel {
-      height: 200px;
-      background: #1a1a2e;
-      border-top: 2px solid #444;
+      padding: 20px;
+      border-radius: 10px;
       display: flex;
       flex-direction: column;
+      gap: 10px;
+      z-index: 1000;
     }
-    #messages {
-      flex: 1;
-      overflow-y: auto;
-      padding: 10px;
-    }
-    #messages div {
-      margin-bottom: 5px;
-    }
-    #chatForm {
-      display: flex;
-      padding: 10px;
-      background: #222;
-    }
-    #chatInput {
-      flex: 1;
+    #authPanel input {
       padding: 10px;
       border: 1px solid #555;
       border-radius: 5px;
       background: #333;
       color: #fff;
-      outline: none;
     }
-    #chatInput:focus {
-      border-color: #7a7aff;
-    }
-    button {
-      margin-left: 10px;
-      padding: 10px 20px;
+    #authPanel button {
+      padding: 10px;
       background: #5a5aff;
       border: none;
       border-radius: 5px;
       color: #fff;
       cursor: pointer;
     }
-    button:hover {
-      background: #4a4ae0;
+    #friendsPanel {
+      position: fixed;
+      right: 10px;
+      top: 10px;
+      background: #2a2a3d;
+      padding: 10px;
+      border-radius: 10px;
+      width: 250px;
+      max-height: 80vh;
+      overflow-y: auto;
+      z-index: 500;
+    }
+    #friendCode {
+      font-weight: bold;
+      color: #ffcc00;
+    }
+    .friend-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 5px 0;
+    }
+    .call-btn, .msg-btn {
+      background: #5a5aff;
+      border: none;
+      border-radius: 5px;
+      color: #fff;
+      padding: 5px 10px;
+      cursor: pointer;
+      margin-left: 5px;
+    }
+    #incomingCall {
+      position: fixed;
+      bottom: 20px;
+      left: 20px;
+      background: #444;
+      padding: 15px;
+      border-radius: 10px;
+      display: none;
+      z-index: 2000;
+    }
+    #videoContainer {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      display: flex;
+      gap: 10px;
+      z-index: 1500;
+    }
+    video {
+      width: 200px;
+      height: 150px;
+      background: #000;
+      border-radius: 10px;
     }
   </style>
 </head>
 <body>
-  <div id="gameArea">
+  <!-- Панель авторизации (показывается, если не вошли) -->
+  <div id="authPanel">
+    <h3>Вход / Регистрация</h3>
+    <input type="email" id="emailInput" placeholder="Email">
+    <input type="password" id="passwordInput" placeholder="Пароль">
+    <button onclick="register()">Создать аккаунт</button>
+    <button onclick="login()">Войти</button>
+  </div>
+
+  <!-- Основное игровое поле -->
+  <div id="gameArea" style="flex:1; position:relative; background:#2a2a3d; overflow:hidden;">
     <canvas id="gameCanvas"></canvas>
   </div>
-  <div id="chatPanel">
-    <div id="messages"></div>
-    <form id="chatForm">
-      <input type="text" id="chatInput" placeholder="Введите сообщение..." autocomplete="off">
-      <button type="submit">Отправить</button>
+
+  <!-- Панель чата -->
+  <div id="chatPanel" style="height:200px; background:#1a1a2e; border-top:2px solid #444; display:flex; flex-direction:column;">
+    <div id="messages" style="flex:1; overflow-y:auto; padding:10px;"></div>
+    <form id="chatForm" style="display:flex; padding:10px; background:#222;">
+      <input type="text" id="chatInput" placeholder="Введите сообщение..." autocomplete="off" style="flex:1; padding:10px; border:1px solid #555; border-radius:5px; background:#333; color:#fff;">
+      <button type="submit" style="margin-left:10px; padding:10px 20px; background:#5a5aff; border:none; border-radius:5px; color:#fff; cursor:pointer;">Отправить</button>
     </form>
   </div>
 
-  <!-- Firebase SDK (compat) -->
+  <!-- Панель друзей (видна только после входа) -->
+  <div id="friendsPanel" style="display:none;">
+    <h4>Друзья</h4>
+    <p>Ваш код: <span id="friendCode"></span></p>
+    <input type="text" id="addFriendInput" placeholder="Введите код друга">
+    <button onclick="addFriend()">Добавить</button>
+    <div id="friendsList"></div>
+  </div>
+
+  <!-- Окно входящего звонка -->
+  <div id="incomingCall">
+    <p id="incomingCallText"></p>
+    <button onclick="acceptCall()">Принять</button>
+    <button onclick="rejectCall()">Отклонить</button>
+  </div>
+
+  <!-- Видео контейнеры -->
+  <div id="videoContainer">
+    <video id="localVideo" autoplay muted></video>
+    <video id="remoteVideo" autoplay></video>
+  </div>
+
+  <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
