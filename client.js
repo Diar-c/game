@@ -22,7 +22,9 @@ canvas.height = canvas.parentElement.clientHeight;
 let myId = null;
 let myName = 'Гость';
 let myColor = '#ffcc00';
+let myAvatar = '😀';
 let myFriendCode = null;
+let myCreatedAt = null;
 const players = {};
 let myX = 100, myY = 100;
 const keys = {};
@@ -32,77 +34,85 @@ let peerConnection = null;
 let currentCall = null;
 let incomingCallData = null;
 
-let authMode = 'login'; // 'login' или 'register'
+let authMode = 'login';
+let currentView = 'chats';
+let currentChat = 'general'; // 'general' или friendId
+let currentFriendId = null;
+let currentFriendName = null;
+
+// Список доступных аватарок
+const avatarOptions = ['😀', '😎', '🤖', '👽', '🐱', '🦊', '🐼', '🐸', '🐙', '🦄'];
 
 // ==================== АУТЕНТИФИКАЦИЯ ====================
 auth.onAuthStateChanged((user) => {
   if (user) {
-    // Пользователь вошёл
     myId = user.uid;
     document.getElementById('topBar').style.display = 'flex';
     document.getElementById('mainContainer').style.display = 'flex';
-    document.getElementById('friendsPanel').style.display = 'flex';
     document.getElementById('authModal').style.display = 'none';
     document.getElementById('logoutBtn').style.display = 'block';
+    document.getElementById('profileButton').style.display = 'flex';
 
-    // Загружаем профиль
+    // Загружаем/создаём профиль
     database.ref(`users/${myId}`).once('value').then(snap => {
       const data = snap.val();
       if (data) {
         myName = data.name || `Гость_${myId.slice(0,4)}`;
         myColor = data.color || getRandomColor();
+        myAvatar = data.avatar || '😀';
         myFriendCode = data.friendCode || generateFriendCode();
+        myCreatedAt = data.createdAt || Date.now();
       } else {
         myName = `Гость_${myId.slice(0,4)}`;
         myColor = getRandomColor();
+        myAvatar = '😀';
         myFriendCode = generateFriendCode();
+        myCreatedAt = Date.now();
         database.ref(`users/${myId}`).set({
           name: myName,
           color: myColor,
-          friendCode: myFriendCode
+          avatar: myAvatar,
+          friendCode: myFriendCode,
+          createdAt: myCreatedAt
         });
       }
-      document.getElementById('friendCode').textContent = myFriendCode;
+      updateProfileUI();
       setupGame();
       setupFriends();
       setupCalls();
+      buildChatList();
+      buildAvatarGrid();
+      // По умолчанию открываем общий чат
+      openChat('general');
     });
   } else {
-    // Пользователь вышел или ещё не вошёл
     myId = null;
     document.getElementById('topBar').style.display = 'none';
     document.getElementById('mainContainer').style.display = 'none';
-    document.getElementById('friendsPanel').style.display = 'none';
-    document.getElementById('authModal').style.display = 'flex'; // показываем окно входа
+    document.getElementById('authModal').style.display = 'flex';
     document.getElementById('logoutBtn').style.display = 'none';
-
-    // Очищаем данные
+    document.getElementById('profileButton').style.display = 'none';
+    document.getElementById('profileMenu').style.display = 'none';
+    // Сброс
     if (myId) {
       database.ref(`players/${myId}`).remove();
       database.ref(`friends/${myId}`).off();
       database.ref(`friendRequests/${myId}`).off();
       database.ref(`calls/${myId}`).off();
     }
-    // Сбрасываем переменные
     localStream = null;
     peerConnection = null;
     currentCall = null;
     incomingCallData = null;
-    document.getElementById('videoContainer').style.display = 'none';
   }
 });
 
-// ==================== ФУНКЦИИ АВТОРИЗАЦИИ ====================
-function hideAuthModal() {
-  document.getElementById('authModal').style.display = 'none';
-}
-
+// ==================== АВТОРИЗАЦИЯ ====================
 function toggleAuthMode() {
   authMode = authMode === 'login' ? 'register' : 'login';
   document.getElementById('authTitle').textContent = authMode === 'login' ? 'Вход' : 'Регистрация';
   document.getElementById('authSubmitBtn').textContent = authMode === 'login' ? 'Войти' : 'Создать аккаунт';
 }
-
 function handleAuth() {
   const email = document.getElementById('emailInput').value;
   const password = document.getElementById('passwordInput').value;
@@ -112,18 +122,61 @@ function handleAuth() {
     auth.createUserWithEmailAndPassword(email, password).catch(err => alert(err.message));
   }
 }
-
 function logout() {
   auth.signOut();
 }
 
-// ==================== ИГРОВАЯ ЧАСТЬ ====================
+// ==================== ПРОФИЛЬ ====================
+function updateProfileUI() {
+  document.getElementById('profileAvatarSmall').textContent = myAvatar;
+  document.getElementById('profileNameSmall').textContent = myName;
+  document.getElementById('profileAvatarLarge').textContent = myAvatar;
+  document.getElementById('profileNickname').textContent = myName;
+  document.getElementById('profileDate').textContent = `Регистрация: ${new Date(myCreatedAt).toLocaleDateString()}`;
+  document.getElementById('profileCode').textContent = `Код: ${myFriendCode}`;
+}
+// Клик по кнопке профиля
+document.getElementById('profileButton').addEventListener('click', () => {
+  const menu = document.getElementById('profileMenu');
+  menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+});
+// Клик по коду — копирование
+document.getElementById('profileCode').addEventListener('click', () => {
+  navigator.clipboard.writeText(myFriendCode);
+  alert('Код скопирован!');
+});
+
+// ==================== ПЕРЕКЛЮЧЕНИЕ ВКЛАДОК ====================
+document.querySelectorAll('.sidebar-icon').forEach(icon => {
+  icon.addEventListener('click', () => {
+    const view = icon.dataset.view;
+    switchView(view);
+  });
+});
+function switchView(view) {
+  currentView = view;
+  document.querySelectorAll('.sidebar-icon').forEach(i => i.classList.remove('active'));
+  document.querySelector(`.sidebar-icon[data-view="${view}"]`).classList.add('active');
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById(`${view}View`).classList.add('active');
+  if (view === 'chats') {
+    // При возврате на чаты показываем текущий чат
+    if (currentChat === 'general') {
+      openChat('general');
+    } else {
+      openChat(currentFriendId);
+    }
+  }
+}
+
+// ==================== ИГРОВАЯ ЧАСТЬ (общий чат) ====================
 function setupGame() {
   database.ref(`players/${myId}`).set({
     name: myName,
     x: myX,
     y: myY,
-    color: myColor
+    color: myColor,
+    avatar: myAvatar
   });
   database.ref(`players/${myId}`).onDisconnect().remove();
 
@@ -135,7 +188,7 @@ function setupGame() {
 
   database.ref('messages').limitToLast(50).on('child_added', snap => {
     const msg = snap.val();
-    addMessage(`${msg.name}: ${msg.text}`);
+    addGeneralMessage(`${msg.name}: ${msg.text}`);
   });
 
   startGameLoop();
@@ -163,11 +216,12 @@ function draw() {
   for (const id in players) {
     const p = players[id];
     ctx.fillStyle = p.color || '#66ccff';
-    ctx.fillRect(p.x, p.y, 20, 20);
+    ctx.fillRect(p.x, p.y, 30, 30);
     ctx.fillStyle = '#fff';
-    ctx.font = '12px Arial';
+    ctx.font = '14px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(p.name, p.x + 10, p.y - 5);
+    ctx.fillText(p.avatar || '😀', p.x + 15, p.y + 20);
+    ctx.fillText(p.name, p.x + 15, p.y - 5);
   }
 }
 
@@ -180,16 +234,16 @@ function startGameLoop() {
   loop();
 }
 
-function addMessage(text) {
+function addGeneralMessage(text) {
   const div = document.createElement('div');
   div.textContent = text;
-  document.getElementById('messages').appendChild(div);
-  document.getElementById('messages').scrollTop = 999999;
+  document.getElementById('generalMessages').appendChild(div);
+  document.getElementById('generalMessages').scrollTop = 999999;
 }
 
-document.getElementById('chatForm').addEventListener('submit', e => {
+document.getElementById('generalChatForm').addEventListener('submit', e => {
   e.preventDefault();
-  const text = document.getElementById('chatInput').value.trim();
+  const text = document.getElementById('generalChatInput').value.trim();
   if (text && myId) {
     database.ref('messages').push({
       userId: myId,
@@ -197,12 +251,100 @@ document.getElementById('chatForm').addEventListener('submit', e => {
       text: text,
       timestamp: firebase.database.ServerValue.TIMESTAMP
     });
-    document.getElementById('chatInput').value = '';
+    document.getElementById('generalChatInput').value = '';
+  }
+});
+
+// ==================== ЧАТЫ (СПИСОК И ОТКРЫТИЕ) ====================
+function buildChatList() {
+  const chatList = document.getElementById('chatList');
+  chatList.innerHTML = '';
+  // Общий чат
+  const generalItem = document.createElement('div');
+  generalItem.className = 'chat-item' + (currentChat === 'general' ? ' active' : '');
+  generalItem.textContent = 'Общий чат';
+  generalItem.onclick = () => openChat('general');
+  chatList.appendChild(generalItem);
+
+  // Личные чаты (для каждого друга)
+  database.ref(`friends/${myId}`).on('value', snap => {
+    const data = snap.val();
+    // Удаляем старые личные чаты
+    const existing = chatList.querySelectorAll('.chat-item.private');
+    existing.forEach(el => el.remove());
+    if (data) {
+      for (const friendId in data) {
+        const friendName = data[friendId].name;
+        const item = document.createElement('div');
+        item.className = 'chat-item private' + (currentChat === friendId ? ' active' : '');
+        item.textContent = `💬 ${friendName}`;
+        item.onclick = () => openChat(friendId, friendName);
+        chatList.appendChild(item);
+      }
+    }
+  });
+}
+
+function openChat(chatId, friendName = null) {
+  // Сброс активных классов
+  document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
+  // Выделяем нужный элемент
+  const chatItems = document.querySelectorAll('.chat-item');
+  if (chatId === 'general') {
+    currentChat = 'general';
+    chatItems[0]?.classList.add('active'); // первый - общий
+    document.getElementById('generalChat').style.display = 'flex';
+    document.getElementById('privateChat').style.display = 'none';
+  } else {
+    currentChat = chatId;
+    currentFriendId = chatId;
+    currentFriendName = friendName;
+    // Найти элемент по id друга
+    chatItems.forEach(el => {
+      if (el.textContent.includes(friendName)) el.classList.add('active');
+    });
+    document.getElementById('generalChat').style.display = 'none';
+    document.getElementById('privateChat').style.display = 'flex';
+    document.getElementById('privateChatHeader').textContent = `Личный чат с ${friendName}`;
+    // Очищаем сообщения
+    document.getElementById('privateMessages').innerHTML = '';
+    // Подписываемся на личные сообщения
+    const friendKey = [myId, chatId].sort().join('_');
+    database.ref(`privateMessages/${friendKey}`).off(); // снимаем старый слушатель
+    database.ref(`privateMessages/${friendKey}`).limitToLast(50).on('child_added', snap => {
+      const msg = snap.val();
+      const sender = msg.from === myId ? 'Вы' : friendName;
+      addPrivateMessage(`${sender}: ${msg.text}`);
+    });
+  }
+}
+
+function addPrivateMessage(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  document.getElementById('privateMessages').appendChild(div);
+  document.getElementById('privateMessages').scrollTop = 999999;
+}
+
+document.getElementById('privateChatForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const text = document.getElementById('privateChatInput').value.trim();
+  if (text && currentFriendId) {
+    const friendKey = [myId, currentFriendId].sort().join('_');
+    database.ref(`privateMessages/${friendKey}`).push({
+      from: myId,
+      to: currentFriendId,
+      fromName: myName,
+      text: text,
+      timestamp: firebase.database.ServerValue.TIMESTAMP
+    });
+    document.getElementById('privateChatInput').value = '';
   }
 });
 
 // ==================== ДРУЗЬЯ ====================
 function setupFriends() {
+  // Слушаем входящие запросы
   database.ref(`friendRequests/${myId}`).on('child_added', snap => {
     const request = snap.val();
     if (confirm(`${request.name} хочет добавить вас в друзья. Принять?`)) {
@@ -212,6 +354,7 @@ function setupFriends() {
     database.ref(`friendRequests/${myId}/${snap.key}`).remove();
   });
 
+  // Слушаем список друзей и обновляем вкладку "Друзья"
   database.ref(`friends/${myId}`).on('value', snap => {
     const data = snap.val();
     const listDiv = document.getElementById('friendsList');
@@ -224,7 +367,7 @@ function setupFriends() {
         friendItem.innerHTML = `
           <span class="name">${friendName}</span>
           <div class="actions">
-            <button onclick="startPrivateChat('${friendId}','${friendName}')">💬</button>
+            <button onclick="openChat('${friendId}','${friendName}')">💬</button>
             <button onclick="startCall('${friendId}','${friendName}')">📞</button>
           </div>
         `;
@@ -257,18 +400,23 @@ function addFriend() {
     });
 }
 
-function startPrivateChat(friendId, friendName) {
-  const friendKey = [myId, friendId].sort().join('_');
-  const message = prompt(`Сообщение для ${friendName}:`);
-  if (message) {
-    database.ref(`privateMessages/${friendKey}`).push({
-      from: myId,
-      to: friendId,
-      fromName: myName,
-      text: message,
-      timestamp: firebase.database.ServerValue.TIMESTAMP
-    });
-  }
+// ==================== НАСТРОЙКИ (АВАТАРКА) ====================
+function buildAvatarGrid() {
+  const grid = document.getElementById('avatarGrid');
+  grid.innerHTML = '';
+  avatarOptions.forEach(avatar => {
+    const div = document.createElement('div');
+    div.className = 'avatar-option' + (avatar === myAvatar ? ' selected' : '');
+    div.textContent = avatar;
+    div.onclick = () => {
+      myAvatar = avatar;
+      database.ref(`users/${myId}`).update({ avatar: avatar });
+      database.ref(`players/${myId}`).update({ avatar: avatar });
+      updateProfileUI();
+      buildAvatarGrid(); // перерисовать
+    };
+    grid.appendChild(div);
+  });
 }
 
 // ==================== ЗВОНКИ ====================
