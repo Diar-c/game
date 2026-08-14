@@ -31,12 +31,12 @@ const keys = {};
 
 let localStream = null;
 let peerConnection = null;
-let currentCall = null; // { id, friendId, friendName }
+let currentCall = null;
 let incomingCallData = null;
 
 let authMode = 'login';
 let currentView = 'chats';
-let currentChat = 'general'; // 'general' или friendId
+let currentChat = 'general';
 let currentFriendId = null;
 let currentFriendName = null;
 
@@ -109,6 +109,7 @@ function toggleAuthMode() {
   document.getElementById('authTitle').textContent = authMode === 'login' ? 'Вход' : 'Регистрация';
   document.getElementById('authSubmitBtn').textContent = authMode === 'login' ? 'Войти' : 'Создать аккаунт';
 }
+
 function handleAuth() {
   const email = document.getElementById('emailInput').value;
   const password = document.getElementById('passwordInput').value;
@@ -118,6 +119,7 @@ function handleAuth() {
     auth.createUserWithEmailAndPassword(email, password).catch(err => alert(err.message));
   }
 }
+
 function logout() {
   auth.signOut();
 }
@@ -135,12 +137,15 @@ function updateProfileUI() {
   document.getElementById('nicknameInput').value = myName;
 }
 
-// Вспомогательная функция для отображения аватарки (emoji или изображение)
 function setAvatarDisplay(element, avatar) {
+  if (!avatar) {
+    element.textContent = '😀';
+    return;
+  }
   if (avatar.startsWith('data:image')) {
-    element.innerHTML = `<img src="${avatar}" alt="avatar">`;
+    element.innerHTML = `<img src="${avatar}" alt="avatar" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">`;
   } else {
-    element.textContent = avatar; // emoji
+    element.textContent = avatar;
   }
 }
 
@@ -148,6 +153,7 @@ document.getElementById('profileButton').addEventListener('click', () => {
   const menu = document.getElementById('profileMenu');
   menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
 });
+
 document.getElementById('profileCode').addEventListener('click', () => {
   navigator.clipboard.writeText(myFriendCode);
   alert('Код скопирован!');
@@ -159,6 +165,7 @@ document.querySelectorAll('.sidebar-icon').forEach(icon => {
     switchView(icon.dataset.view);
   });
 });
+
 function switchView(view) {
   currentView = view;
   document.querySelectorAll('.sidebar-icon').forEach(i => i.classList.remove('active'));
@@ -222,7 +229,6 @@ function draw() {
     ctx.fillStyle = '#fff';
     ctx.font = '14px Arial';
     ctx.textAlign = 'center';
-    // Если аватарка - изображение, показываем первую букву имени
     const avatarText = (p.avatar && !p.avatar.startsWith('data:image')) ? p.avatar : p.name[0];
     ctx.fillText(avatarText, p.x + 15, p.y + 20);
     ctx.fillText(p.name, p.x + 15, p.y - 5);
@@ -441,17 +447,25 @@ function buildAvatarGrid() {
     grid.appendChild(div);
   });
 
-  // Кнопка загрузки
+  // Кнопка загрузки (исправленная)
   const uploadBtn = document.getElementById('uploadAvatarBtn');
   uploadBtn.onclick = () => {
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.accept = 'image/*';
+    fileInput.style.display = 'none';
+    document.body.appendChild(fileInput); // Важно: добавляем в DOM
     fileInput.onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
+      if (!file.type.startsWith('image/')) {
+        alert('Пожалуйста, выберите изображение.');
+        document.body.removeChild(fileInput);
+        return;
+      }
       if (file.size > 500 * 1024) {
         alert('Файл слишком большой. Максимум 500 КБ.');
+        document.body.removeChild(fileInput);
         return;
       }
       const reader = new FileReader();
@@ -462,6 +476,7 @@ function buildAvatarGrid() {
         database.ref(`players/${myId}`).update({ avatar: dataUrl });
         updateProfileUI();
         buildAvatarGrid();
+        document.body.removeChild(fileInput);
       };
       reader.readAsDataURL(file);
     };
@@ -471,7 +486,14 @@ function buildAvatarGrid() {
 
 function changeNickname() {
   const newNick = document.getElementById('nicknameInput').value.trim();
-  if (!newNick) return;
+  if (!newNick) {
+    alert('Ник не может быть пустым.');
+    return;
+  }
+  if (newNick.length > 32) {
+    alert('Максимальная длина ника 32 символа.');
+    return;
+  }
   myName = newNick;
   database.ref(`users/${myId}`).update({ name: newNick });
   database.ref(`players/${myId}`).update({ name: newNick });
@@ -481,7 +503,6 @@ function changeNickname() {
 
 // ==================== ЗВОНКИ (Discord-like) ====================
 function setupCalls() {
-  // Слушаем входящие звонки
   database.ref(`calls/${myId}`).on('value', snap => {
     const data = snap.val();
     if (data && data.status === 'ringing') {
@@ -493,7 +514,6 @@ function setupCalls() {
     }
   });
 
-  // Слушаем завершение звонка (удаление записи)
   database.ref(`calls/${myId}`).on('child_removed', snap => {
     if (currentCall && snap.key === currentCall.id) {
       endCallUI();
@@ -509,7 +529,6 @@ async function startCall(friendId, friendName) {
     return;
   }
 
-  // Показываем окно звонка
   document.getElementById('localVideo').srcObject = localStream;
   document.getElementById('callPanel').style.display = 'flex';
   document.getElementById('incomingCall').style.display = 'none';
@@ -524,7 +543,6 @@ async function startCall(friendId, friendName) {
     timestamp: firebase.database.ServerValue.TIMESTAMP
   });
 
-  // Ожидаем ответа
   database.ref(`calls/${friendId}/${callId}`).on('value', snap => {
     const data = snap.val();
     if (data && data.status === 'accepted') {
@@ -560,7 +578,6 @@ function rejectCall() {
 
 function endCall() {
   if (currentCall) {
-    // Если мы инициатор, удаляем запись; если получатель, просто обновляем статус
     if (currentCall.friendId) {
       database.ref(`calls/${currentCall.friendId}/${currentCall.id}`).remove();
     }
