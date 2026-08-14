@@ -31,6 +31,7 @@
       padding: 0 16px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.3);
       z-index: 100;
+      display: none; /* Скрыта до входа */
     }
     #topBar .logo {
       font-weight: bold;
@@ -72,6 +73,7 @@
       display: flex;
       flex: 1;
       overflow: hidden;
+      display: none; /* Скрыт до входа */
     }
 
     /* ========== ЛЕВЫЙ САЙДБАР ========== */
@@ -186,6 +188,7 @@
       border-left: 1px solid #202225;
       padding: 16px 8px;
       overflow-y: auto;
+      display: none; /* Скрыта до входа */
     }
     #friendsPanel h4 {
       color: #fff;
@@ -285,6 +288,7 @@
       align-items: center;
       justify-content: center;
       z-index: 1000;
+      display: none; /* Скрыто по умолчанию, показывается при необходимости */
     }
     .modal-content {
       background: #36393f;
@@ -361,7 +365,7 @@
       position: fixed;
       bottom: 20px;
       right: 20px;
-      display: flex;
+      display: none; /* Скрыт по умолчанию, показывается только при звонке */
       gap: 10px;
       z-index: 1500;
     }
@@ -375,24 +379,22 @@
   </style>
 </head>
 <body>
-  <!-- Верхняя панель -->
-  <div id="topBar">
-    <div class="logo"><span>⚡</span> GameChat</div>
-    <div id="authButtons">
-      <button id="loginBtn" onclick="showLogin()">Войти</button>
-      <button id="logoutBtn" onclick="logout()">Выйти</button>
-    </div>
-  </div>
-
-  <!-- Модальное окно авторизации -->
-  <div id="authModal" class="modal-overlay" style="display:none;">
+  <!-- Модальное окно авторизации (показывается автоматически для неавторизованных) -->
+  <div id="authModal" class="modal-overlay">
     <div class="modal-content">
       <h3 id="authTitle">Вход</h3>
       <input type="email" id="emailInput" placeholder="Email">
       <input type="password" id="passwordInput" placeholder="Пароль">
       <button id="authSubmitBtn" onclick="handleAuth()">Войти</button>
       <button class="secondary" onclick="toggleAuthMode()">Нет аккаунта? Создать</button>
-      <button class="danger" onclick="hideAuthModal()">Отмена</button>
+    </div>
+  </div>
+
+  <!-- Верхняя панель -->
+  <div id="topBar">
+    <div class="logo"><span>⚡</span> GameChat</div>
+    <div id="authButtons">
+      <button id="logoutBtn" onclick="logout()">Выйти</button>
     </div>
   </div>
 
@@ -440,7 +442,7 @@
     <button class="reject" onclick="rejectCall()">Отклонить</button>
   </div>
 
-  <!-- Видео -->
+  <!-- Видео (появляется только при звонке) -->
   <div id="videoContainer">
     <video id="localVideo" autoplay muted></video>
     <video id="remoteVideo" autoplay></video>
