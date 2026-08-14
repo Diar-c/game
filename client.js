@@ -22,17 +22,20 @@ canvas.height = canvas.parentElement.clientHeight;
 let myId = null;
 let myName = 'Гость';
 let myColor = '#ffcc00';
-let myAvatar = '😀'; // Может быть emoji или data URL
+let myAvatar = '😀';
 let myFriendCode = null;
 let myCreatedAt = null;
 const players = {};
 let myX = 100, myY = 100;
 const keys = {};
 
+// WebRTC
 let localStream = null;
 let peerConnection = null;
-let currentCall = null;
-let incomingCallData = null;
+let currentCall = null;          // { id, friendId, friendName, status, timeout }
+let incomingCallData = null;     // { callId, callerId, callerName }
+let ringtoneAudioContext = null; // для звукового сигнала
+let ringtoneTimer = null;
 
 let authMode = 'login';
 let currentView = 'chats';
@@ -90,12 +93,15 @@ auth.onAuthStateChanged((user) => {
     document.getElementById('logoutBtn').style.display = 'none';
     document.getElementById('profileButton').style.display = 'none';
     document.getElementById('profileMenu').style.display = 'none';
+    // Очистка при выходе
     if (myId) {
       database.ref(`players/${myId}`).remove();
       database.ref(`friends/${myId}`).off();
       database.ref(`friendRequests/${myId}`).off();
       database.ref(`calls/${myId}`).off();
     }
+    stopRingtone();
+    endCallUI();
     localStream = null;
     peerConnection = null;
     currentCall = null;
@@ -109,7 +115,6 @@ function toggleAuthMode() {
   document.getElementById('authTitle').textContent = authMode === 'login' ? 'Вход' : 'Регистрация';
   document.getElementById('authSubmitBtn').textContent = authMode === 'login' ? 'Войти' : 'Создать аккаунт';
 }
-
 function handleAuth() {
   const email = document.getElementById('emailInput').value;
   const password = document.getElementById('passwordInput').value;
@@ -119,7 +124,6 @@ function handleAuth() {
     auth.createUserWithEmailAndPassword(email, password).catch(err => alert(err.message));
   }
 }
-
 function logout() {
   auth.signOut();
 }
@@ -153,7 +157,6 @@ document.getElementById('profileButton').addEventListener('click', () => {
   const menu = document.getElementById('profileMenu');
   menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
 });
-
 document.getElementById('profileCode').addEventListener('click', () => {
   navigator.clipboard.writeText(myFriendCode);
   alert('Код скопирован!');
@@ -165,7 +168,6 @@ document.querySelectorAll('.sidebar-icon').forEach(icon => {
     switchView(icon.dataset.view);
   });
 });
-
 function switchView(view) {
   currentView = view;
   document.querySelectorAll('.sidebar-icon').forEach(i => i.classList.remove('active'));
@@ -447,14 +449,13 @@ function buildAvatarGrid() {
     grid.appendChild(div);
   });
 
-  // Кнопка загрузки (исправленная)
   const uploadBtn = document.getElementById('uploadAvatarBtn');
   uploadBtn.onclick = () => {
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.accept = 'image/*';
     fileInput.style.display = 'none';
-    document.body.appendChild(fileInput); // Важно: добавляем в DOM
+    document.body.appendChild(fileInput);
     fileInput.onchange = (e) => {
       const file = e.target.files[0];
       if (!file) return;
@@ -501,41 +502,90 @@ function changeNickname() {
   alert('Ник изменён!');
 }
 
-// ==================== ЗВОНКИ (Discord-like) ====================
-function setupCalls() {
-  database.ref(`calls/${myId}`).on('value', snap => {
-    const data = snap.val();
-    if (data && data.status === 'ringing') {
-      incomingCallData = { callId: snap.key, callerId: data.callerId, callerName: data.callerName };
-      document.getElementById('incomingCallText').textContent = `Входящий звонок от ${data.callerName}`;
-      document.getElementById('incomingCall').style.display = 'block';
-    } else {
-      document.getElementById('incomingCall').style.display = 'none';
-    }
-  });
+// ==================== ЗВОНКИ (Discord-like улучшенные) ====================
 
-  database.ref(`calls/${myId}`).on('child_removed', snap => {
-    if (currentCall && snap.key === currentCall.id) {
-      endCallUI();
-    }
+// Звуковой сигнал (имитация гудков)
+function playRingtone() {
+  if (ringtoneAudioContext) return;
+  ringtoneAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const beep = () => {
+    if (!ringtoneAudioContext) return;
+    const oscillator = ringtoneAudioContext.createOscillator();
+    const gainNode = ringtoneAudioContext.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.value = 440;
+    gainNode.gain.value = 0.2;
+    oscillator.connect(gainNode);
+    gainNode.connect(ringtoneAudioContext.destination);
+    oscillator.start();
+    setTimeout(() => {
+      oscillator.stop();
+      if (ringtoneTimer) {
+        ringtoneTimer = setTimeout(beep, 1500); // пауза между гудками
+      }
+    }, 500);
+  };
+  beep();
+}
+
+function stopRingtone() {
+  if (ringtoneTimer) {
+    clearTimeout(ringtoneTimer);
+    ringtoneTimer = null;
+  }
+  if (ringtoneAudioContext) {
+    ringtoneAudioContext.close().catch(() => {});
+    ringtoneAudioContext = null;
+  }
+}
+
+// Установка статуса звонка (обновляет текст в UI)
+function updateCallStatus(text) {
+  const statusElement = document.getElementById('callStatus');
+  if (statusElement) statusElement.textContent = text;
+  else {
+    // Если элемента нет, выводим в заголовок окна звонка
+    const callPanel = document.getElementById('callPanel');
+    if (callPanel) callPanel.setAttribute('data-status', text);
+  }
+}
+
+// Проверка, онлайн ли пользователь (есть ли запись в players)
+function isUserOnline(userId) {
+  return new Promise((resolve) => {
+    database.ref(`players/${userId}`).once('value')
+      .then(snap => resolve(snap.exists()))
+      .catch(() => resolve(false));
   });
 }
 
+// Запуск звонка (инициатор)
 async function startCall(friendId, friendName) {
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-  } catch (err) {
-    alert('Нет доступа к микрофону/камере');
+  // Проверяем, онлайн ли друг
+  const online = await isUserOnline(friendId);
+  if (!online) {
+    alert(`${friendName} сейчас не в сети. Звонок невозможен.`);
     return;
   }
 
+  // Запрашиваем медиа
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+  } catch (err) {
+    alert('Нет доступа к микрофону/камере. Проверьте разрешения.');
+    return;
+  }
+
+  // Показываем панель звонка
   document.getElementById('localVideo').srcObject = localStream;
   document.getElementById('callPanel').style.display = 'flex';
   document.getElementById('incomingCall').style.display = 'none';
+  updateCallStatus('Звонит...');
 
+  // Создаём запись звонка в базе
   const callRef = database.ref(`calls/${friendId}`).push();
   const callId = callRef.key;
-  currentCall = { id: callId, friendId, friendName };
+  currentCall = { id: callId, friendId, friendName, status: 'ringing' };
   callRef.set({
     callerId: myId,
     callerName: myName,
@@ -543,52 +593,112 @@ async function startCall(friendId, friendName) {
     timestamp: firebase.database.ServerValue.TIMESTAMP
   });
 
+  // Таймер на случай, если не ответят за 30 секунд
+  const timeout = setTimeout(() => {
+    if (currentCall && currentCall.status === 'ringing') {
+      // Удаляем звонок
+      database.ref(`calls/${friendId}/${callId}`).remove();
+      database.ref(`calls/${myId}/${callId}`).remove();
+      endCallUI();
+      alert('Звонок не был принят.');
+    }
+  }, 30000);
+  currentCall.timeout = timeout;
+
+  // Слушаем изменения статуса
   database.ref(`calls/${friendId}/${callId}`).on('value', snap => {
     const data = snap.val();
-    if (data && data.status === 'accepted') {
+    if (!data) return;
+    if (data.status === 'accepted') {
+      clearTimeout(currentCall.timeout);
+      currentCall.status = 'accepted';
+      updateCallStatus('Соединение...');
       createPeerConnection(friendId, callId, true);
-    } else if (data && data.status === 'rejected') {
+    } else if (data.status === 'rejected') {
+      clearTimeout(currentCall.timeout);
       endCallUI();
+      alert(`${friendName} отклонил звонок.`);
     }
   });
 }
 
-function acceptCall() {
+// Принятие входящего звонка
+async function acceptCall() {
   if (!incomingCallData) return;
-  navigator.mediaDevices.getUserMedia({ audio: true, video: true })
-    .then(stream => {
-      localStream = stream;
-      document.getElementById('localVideo').srcObject = stream;
-      document.getElementById('callPanel').style.display = 'flex';
-      document.getElementById('incomingCall').style.display = 'none';
-      database.ref(`calls/${myId}/${incomingCallData.callId}`).update({ status: 'accepted' });
-      currentCall = { id: incomingCallData.callId, friendId: incomingCallData.callerId, friendName: incomingCallData.callerName };
-      createPeerConnection(incomingCallData.callerId, incomingCallData.callId, false);
-    })
-    .catch(err => alert('Нет доступа к медиа'));
+  stopRingtone();
+
+  try {
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+  } catch (err) {
+    alert('Нет доступа к микрофону/камере.');
+    database.ref(`calls/${myId}/${incomingCallData.callId}`).update({ status: 'rejected' });
+    incomingCallData = null;
+    return;
+  }
+
+  document.getElementById('localVideo').srcObject = localStream;
+  document.getElementById('callPanel').style.display = 'flex';
+  document.getElementById('incomingCall').style.display = 'none';
+  updateCallStatus('Соединение...');
+
+  // Обновляем статус звонка
+  database.ref(`calls/${myId}/${incomingCallData.callId}`).update({ status: 'accepted' });
+
+  // Устанавливаем текущий звонок
+  currentCall = {
+    id: incomingCallData.callId,
+    friendId: incomingCallData.callerId,
+    friendName: incomingCallData.callerName,
+    status: 'accepted'
+  };
+
+  // Создаём peer connection
+  createPeerConnection(incomingCallData.callerId, incomingCallData.callId, false);
+  incomingCallData = null;
 }
 
+// Отклонение входящего звонка
 function rejectCall() {
   if (incomingCallData) {
     database.ref(`calls/${myId}/${incomingCallData.callId}`).update({ status: 'rejected' });
     database.ref(`calls/${myId}/${incomingCallData.callId}`).remove();
     incomingCallData = null;
+    stopRingtone();
+    document.getElementById('incomingCall').style.display = 'none';
   }
 }
 
+// Завершение звонка (любая сторона)
 function endCall() {
   if (currentCall) {
-    if (currentCall.friendId) {
+    // Если мы инициатор, удаляем запись у друга; если получатель - у себя
+    if (currentCall.friendId && currentCall.status === 'ringing') {
+      // Если ещё звонит, удаляем у друга
       database.ref(`calls/${currentCall.friendId}/${currentCall.id}`).remove();
     }
+    // Удаляем у себя
     database.ref(`calls/${myId}/${currentCall.id}`).remove();
+
+    // Если есть peer connection, закрываем
+    if (peerConnection) {
+      peerConnection.close();
+      peerConnection = null;
+    }
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+      localStream = null;
+    }
+    document.getElementById('localVideo').srcObject = null;
+    document.getElementById('remoteVideo').srcObject = null;
+    document.getElementById('callPanel').style.display = 'none';
+    updateCallStatus('');
+    currentCall = null;
   }
-  endCallUI();
 }
 
+// Универсальное завершение UI (вызывается из разных мест)
 function endCallUI() {
-  document.getElementById('callPanel').style.display = 'none';
-  document.getElementById('incomingCall').style.display = 'none';
+  stopRingtone();
   if (localStream) {
     localStream.getTracks().forEach(track => track.stop());
     localStream = null;
@@ -599,10 +709,14 @@ function endCallUI() {
   }
   document.getElementById('localVideo').srcObject = null;
   document.getElementById('remoteVideo').srcObject = null;
+  document.getElementById('callPanel').style.display = 'none';
+  document.getElementById('incomingCall').style.display = 'none';
+  updateCallStatus('');
   currentCall = null;
   incomingCallData = null;
 }
 
+// Переключение микрофона
 function toggleMute() {
   if (localStream) {
     const audioTrack = localStream.getAudioTracks()[0];
@@ -613,6 +727,7 @@ function toggleMute() {
   }
 }
 
+// Переключение камеры
 function toggleCamera() {
   if (localStream) {
     const videoTrack = localStream.getVideoTracks()[0];
@@ -623,6 +738,7 @@ function toggleCamera() {
   }
 }
 
+// Создание peer connection
 function createPeerConnection(remoteId, callId, isCaller) {
   const pc = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
@@ -633,6 +749,7 @@ function createPeerConnection(remoteId, callId, isCaller) {
 
   pc.ontrack = (event) => {
     document.getElementById('remoteVideo').srcObject = event.streams[0];
+    updateCallStatus('В разговоре');
   };
 
   pc.onicecandidate = (event) => {
@@ -649,7 +766,7 @@ function createPeerConnection(remoteId, callId, isCaller) {
   }
 
   database.ref(`calls/${myId}/${callId}/iceCandidates`).on('child_added', snap => {
-    pc.addIceCandidate(new RTCIceCandidate(snap.val()));
+    pc.addIceCandidate(new RTCIceCandidate(snap.val())).catch(() => {});
   });
 
   if (!isCaller) {
@@ -666,6 +783,47 @@ function createPeerConnection(remoteId, callId, isCaller) {
       }
     });
   }
+}
+
+// Слушатель входящих звонков и изменений
+function setupCalls() {
+  // Входящие звонки
+  database.ref(`calls/${myId}`).on('value', snap => {
+    const data = snap.val();
+    if (data) {
+      // Если есть звонок со статусом ringing и мы не в звонке
+      const entries = Object.entries(data);
+      const ringingEntry = entries.find(([key, value]) => value.status === 'ringing');
+      if (ringingEntry && !currentCall) {
+        incomingCallData = {
+          callId: ringingEntry[0],
+          callerId: ringingEntry[1].callerId,
+          callerName: ringingEntry[1].callerName
+        };
+        document.getElementById('incomingCallText').textContent = `Входящий звонок от ${ringingEntry[1].callerName}`;
+        document.getElementById('incomingCall').style.display = 'block';
+        playRingtone();
+      } else {
+        // Если звонок был принят или отклонён другим способом, скрываем
+        document.getElementById('incomingCall').style.display = 'none';
+        stopRingtone();
+      }
+    } else {
+      document.getElementById('incomingCall').style.display = 'none';
+      stopRingtone();
+    }
+  });
+
+  // Удаление звонка (когда кто-то завершил)
+  database.ref(`calls/${myId}`).on('child_removed', snap => {
+    if (currentCall && snap.key === currentCall.id) {
+      endCallUI();
+    } else if (incomingCallData && snap.key === incomingCallData.callId) {
+      incomingCallData = null;
+      document.getElementById('incomingCall').style.display = 'none';
+      stopRingtone();
+    }
+  });
 }
 
 // ==================== ВСПОМОГАТЕЛЬНЫЕ ====================
