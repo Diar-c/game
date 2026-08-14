@@ -26,12 +26,11 @@
     #topBar {
       height: 48px;
       background: #202225;
-      display: flex;
+      display: none;
       align-items: center;
       padding: 0 16px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.3);
       z-index: 100;
-      display: none; /* Скрыта до входа */
     }
     #topBar .logo {
       font-weight: bold;
@@ -39,41 +38,25 @@
       font-size: 18px;
       letter-spacing: 0.5px;
     }
-    #topBar .logo span {
-      color: #5865f2;
-    }
-    #authButtons {
+    #topBar .logo span { color: #5865f2; }
+    #logoutBtn {
       margin-left: auto;
-      display: flex;
-      gap: 8px;
-    }
-    #authButtons button {
-      background: #5865f2;
-      color: #fff;
+      background: #ed4245;
       border: none;
+      color: #fff;
       padding: 8px 16px;
       border-radius: 4px;
       cursor: pointer;
       font-size: 14px;
-      transition: background 0.2s;
-    }
-    #authButtons button:hover {
-      background: #4752c4;
-    }
-    #logoutBtn {
       display: none;
-      background: #ed4245 !important;
     }
-    #logoutBtn:hover {
-      background: #c03537 !important;
-    }
+    #logoutBtn:hover { background: #c03537; }
 
     /* ========== ОСНОВНОЙ КОНТЕЙНЕР ========== */
     #mainContainer {
-      display: flex;
+      display: none;
       flex: 1;
       overflow: hidden;
-      display: none; /* Скрыт до входа */
     }
 
     /* ========== ЛЕВЫЙ САЙДБАР ========== */
@@ -100,7 +83,8 @@
       font-size: 20px;
       font-weight: bold;
     }
-    .sidebar-icon:hover {
+    .sidebar-icon:hover,
+    .sidebar-icon.active {
       background: #5865f2;
       border-radius: 30%;
       color: #fff;
@@ -114,7 +98,52 @@
       background: #36393f;
     }
 
-    /* Игровое поле */
+    /* Контентные вкладки */
+    .view {
+      display: none;
+      flex: 1;
+      overflow: hidden;
+      flex-direction: column;
+    }
+    .view.active { display: flex; }
+
+    /* ========== ВКЛАДКА ЧАТЫ ========== */
+    #chatsView {
+      flex-direction: row;
+    }
+    #chatList {
+      width: 240px;
+      background: #2f3136;
+      border-right: 1px solid #202225;
+      padding: 16px 8px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .chat-item {
+      padding: 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      color: #dcddde;
+      font-size: 15px;
+      transition: background 0.2s;
+    }
+    .chat-item:hover { background: #36393f; }
+    .chat-item.active { background: #40444b; color: #fff; }
+
+    #chatWindow {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    /* Общий чат (игровое поле + чат) */
+    #generalChat {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
     #gameArea {
       flex: 1;
       background: #2f3136;
@@ -127,33 +156,28 @@
       height: 100%;
       display: block;
     }
-
-    /* Чат-панель */
-    #chatPanel {
-      height: 240px;
+    #generalChatPanel {
+      height: 200px;
       background: #36393f;
       display: flex;
       flex-direction: column;
-      border-top: 1px solid #202225;
     }
-    #messages {
+    #generalMessages {
       flex: 1;
       overflow-y: auto;
       padding: 10px 16px;
       font-size: 15px;
       line-height: 1.5;
     }
-    #messages div {
-      padding: 2px 0;
-    }
-    #chatForm {
+    #generalMessages div { padding: 2px 0; }
+    #generalChatForm {
       display: flex;
       padding: 8px 16px;
       background: #40444b;
       margin: 0 16px 16px;
       border-radius: 8px;
     }
-    #chatInput {
+    #generalChatInput {
       flex: 1;
       background: transparent;
       border: none;
@@ -162,10 +186,8 @@
       font-size: 15px;
       padding: 8px;
     }
-    #chatInput::placeholder {
-      color: #72767d;
-    }
-    #chatForm button {
+    #generalChatInput::placeholder { color: #72767d; }
+    #generalChatForm button {
       background: #5865f2;
       color: #fff;
       border: none;
@@ -173,48 +195,68 @@
       border-radius: 4px;
       cursor: pointer;
       font-weight: bold;
-      transition: background 0.2s;
-    }
-    #chatForm button:hover {
-      background: #4752c4;
     }
 
-    /* ========== ПРАВАЯ ПАНЕЛЬ (ДРУЗЬЯ) ========== */
-    #friendsPanel {
-      width: 260px;
-      background: #2f3136;
+    /* Личный чат */
+    #privateChat {
+      flex: 1;
       display: flex;
       flex-direction: column;
-      border-left: 1px solid #202225;
-      padding: 16px 8px;
-      overflow-y: auto;
-      display: none; /* Скрыта до входа */
+      overflow: hidden;
     }
-    #friendsPanel h4 {
+    #privateChatHeader {
+      padding: 16px;
+      border-bottom: 1px solid #202225;
       color: #fff;
-      font-size: 14px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 12px;
-      padding: 0 8px;
-    }
-    #friendCodeBlock {
-      background: #36393f;
-      border-radius: 4px;
-      padding: 10px;
-      margin-bottom: 16px;
-      font-size: 13px;
-      color: #b9bbbe;
-    }
-    #friendCode {
       font-weight: bold;
-      color: #f0b232;
-      font-size: 16px;
+    }
+    #privateMessages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 16px;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    #privateMessages div { padding: 2px 0; }
+    #privateChatForm {
+      display: flex;
+      padding: 8px 16px;
+      background: #40444b;
+      margin: 0 16px 16px;
+      border-radius: 8px;
+    }
+    #privateChatInput {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #dcddde;
+      font-size: 15px;
+      padding: 8px;
+    }
+    #privateChatForm button {
+      background: #5865f2;
+      color: #fff;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    /* ========== ВКЛАДКА ДРУЗЬЯ ========== */
+    #friendsView {
+      padding: 20px;
+      overflow-y: auto;
+    }
+    #friendsView h2 {
+      color: #fff;
+      margin-bottom: 16px;
     }
     .friend-actions {
       display: flex;
       gap: 6px;
-      margin-bottom: 12px;
+      margin-bottom: 16px;
     }
     #addFriendInput {
       flex: 1;
@@ -224,11 +266,8 @@
       padding: 8px;
       color: #dcddde;
       outline: none;
-      font-size: 14px;
     }
-    #addFriendInput::placeholder {
-      color: #72767d;
-    }
+    #addFriendInput::placeholder { color: #72767d; }
     .friend-actions button {
       background: #5865f2;
       border: none;
@@ -248,21 +287,12 @@
       align-items: center;
       padding: 8px;
       border-radius: 4px;
-      background: transparent;
       transition: background 0.2s;
       font-size: 14px;
-      color: #dcddde;
     }
-    .friend-item:hover {
-      background: #36393f;
-    }
-    .friend-item .name {
-      flex: 1;
-    }
-    .friend-item .actions {
-      display: flex;
-      gap: 4px;
-    }
+    .friend-item:hover { background: #36393f; }
+    .friend-item .name { flex: 1; }
+    .friend-item .actions { display: flex; gap: 4px; }
     .friend-item button {
       background: #4f545c;
       border: none;
@@ -272,9 +302,124 @@
       cursor: pointer;
       font-size: 12px;
     }
-    .friend-item button:hover {
-      background: #686d73;
+    .friend-item button:hover { background: #686d73; }
+
+    /* ========== ВКЛАДКА НАСТРОЙКИ ========== */
+    #settingsView {
+      padding: 20px;
+      overflow-y: auto;
     }
+    #settingsView h2 {
+      color: #fff;
+      margin-bottom: 16px;
+    }
+    #avatarGrid {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .avatar-option {
+      width: 50px;
+      height: 50px;
+      font-size: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #40444b;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: transform 0.2s, border 0.2s;
+      border: 2px solid transparent;
+    }
+    .avatar-option:hover { transform: scale(1.1); }
+    .avatar-option.selected { border-color: #5865f2; }
+
+    /* ========== ПРОФИЛЬ (ПРАВЫЙ НИЖНИЙ УГОЛ) ========== */
+    #profileButton {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      background: #202225;
+      border-radius: 8px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      z-index: 1500;
+      transition: background 0.2s;
+    }
+    #profileButton:hover { background: #2f3136; }
+    #profileButton .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #5865f2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+    #profileButton .name {
+      color: #dcddde;
+      font-weight: bold;
+      max-width: 120px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Меню профиля */
+    #profileMenu {
+      position: fixed;
+      bottom: 60px;
+      right: 16px;
+      background: #2f3136;
+      border-radius: 8px;
+      padding: 16px;
+      width: 240px;
+      z-index: 1600;
+      display: none;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    #profileMenu .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    #profileMenu .header .avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #5865f2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+    }
+    #profileMenu .header .info {
+      flex: 1;
+    }
+    #profileMenu .header .info .nickname {
+      color: #fff;
+      font-weight: bold;
+    }
+    #profileMenu .header .info .date {
+      color: #b9bbbe;
+      font-size: 12px;
+    }
+    #profileMenu .code-block {
+      background: #36393f;
+      border-radius: 4px;
+      padding: 8px;
+      cursor: pointer;
+      text-align: center;
+      color: #f0b232;
+      font-weight: bold;
+      transition: background 0.2s;
+    }
+    #profileMenu .code-block:hover { background: #40444b; }
 
     /* ========== МОДАЛЬНЫЕ ОКНА ========== */
     .modal-overlay {
@@ -284,11 +429,10 @@
       width: 100%;
       height: 100%;
       background: rgba(0,0,0,0.7);
-      display: flex;
+      display: none;
       align-items: center;
       justify-content: center;
       z-index: 1000;
-      display: none; /* Скрыто по умолчанию, показывается при необходимости */
     }
     .modal-content {
       background: #36393f;
@@ -324,12 +468,8 @@
       font-weight: bold;
       margin-bottom: 6px;
     }
-    .modal-content button.secondary {
-      background: #4f545c;
-    }
-    .modal-content button.danger {
-      background: #ed4245;
-    }
+    .modal-content button.secondary { background: #4f545c; }
+    .modal-content button.danger { background: #ed4245; }
 
     /* Входящий звонок */
     #incomingCall {
@@ -343,10 +483,7 @@
       box-shadow: 0 8px 24px rgba(0,0,0,0.5);
       z-index: 2000;
     }
-    #incomingCall p {
-      color: #fff;
-      margin-bottom: 10px;
-    }
+    #incomingCall p { color: #fff; margin-bottom: 10px; }
     #incomingCall button {
       background: #5865f2;
       border: none;
@@ -356,18 +493,16 @@
       cursor: pointer;
       margin-right: 6px;
     }
-    #incomingCall button.reject {
-      background: #ed4245;
-    }
+    #incomingCall button.reject { background: #ed4245; }
 
     /* Видео контейнеры */
     #videoContainer {
       position: fixed;
       bottom: 20px;
       right: 20px;
-      display: none; /* Скрыт по умолчанию, показывается только при звонке */
+      display: none;
       gap: 10px;
-      z-index: 1500;
+      z-index: 1800;
     }
     video {
       width: 240px;
@@ -379,7 +514,7 @@
   </style>
 </head>
 <body>
-  <!-- Модальное окно авторизации (показывается автоматически для неавторизованных) -->
+  <!-- Модальное окно авторизации -->
   <div id="authModal" class="modal-overlay">
     <div class="modal-content">
       <h3 id="authTitle">Вход</h3>
@@ -393,46 +528,84 @@
   <!-- Верхняя панель -->
   <div id="topBar">
     <div class="logo"><span>⚡</span> GameChat</div>
-    <div id="authButtons">
-      <button id="logoutBtn" onclick="logout()">Выйти</button>
-    </div>
+    <button id="logoutBtn" onclick="logout()">Выйти</button>
   </div>
 
   <!-- Основной контейнер -->
   <div id="mainContainer">
     <!-- Левый сайдбар -->
     <div id="leftSidebar">
-      <div class="sidebar-icon" title="Общий чат">💬</div>
-      <div class="sidebar-icon" title="Друзья">👥</div>
-      <div class="sidebar-icon" title="Настройки">⚙️</div>
+      <div class="sidebar-icon active" data-view="chats" title="Чаты">💬</div>
+      <div class="sidebar-icon" data-view="friends" title="Друзья">👥</div>
+      <div class="sidebar-icon" data-view="settings" title="Настройки">⚙️</div>
     </div>
 
     <!-- Центральная область -->
     <div id="centerArea">
-      <div id="gameArea">
-        <canvas id="gameCanvas"></canvas>
+      <!-- Вкладка Чаты -->
+      <div id="chatsView" class="view active">
+        <div id="chatList">
+          <!-- Заполняется динамически -->
+        </div>
+        <div id="chatWindow">
+          <!-- Общий чат (по умолчанию) -->
+          <div id="generalChat">
+            <div id="gameArea">
+              <canvas id="gameCanvas"></canvas>
+            </div>
+            <div id="generalChatPanel">
+              <div id="generalMessages"></div>
+              <form id="generalChatForm">
+                <input type="text" id="generalChatInput" placeholder="Написать в общий чат..." autocomplete="off">
+                <button type="submit">Отправить</button>
+              </form>
+            </div>
+          </div>
+          <!-- Личный чат (скрыт) -->
+          <div id="privateChat" style="display:none;">
+            <div id="privateChatHeader">Личный чат</div>
+            <div id="privateMessages"></div>
+            <form id="privateChatForm">
+              <input type="text" id="privateChatInput" placeholder="Введите сообщение..." autocomplete="off">
+              <button type="submit">Отправить</button>
+            </form>
+          </div>
+        </div>
       </div>
-      <div id="chatPanel">
-        <div id="messages"></div>
-        <form id="chatForm">
-          <input type="text" id="chatInput" placeholder="Написать в общий чат..." autocomplete="off">
-          <button type="submit">Отправить</button>
-        </form>
-      </div>
-    </div>
 
-    <!-- Правая панель (друзья) -->
-    <div id="friendsPanel">
-      <h4>Друзья</h4>
-      <div id="friendCodeBlock">
-        Ваш код: <span id="friendCode">—</span>
+      <!-- Вкладка Друзья -->
+      <div id="friendsView" class="view">
+        <h2>Друзья</h2>
+        <div class="friend-actions">
+          <input type="text" id="addFriendInput" placeholder="Введите код друга">
+          <button onclick="addFriend()">Добавить</button>
+        </div>
+        <div id="friendsList"></div>
       </div>
-      <div class="friend-actions">
-        <input type="text" id="addFriendInput" placeholder="Код друга">
-        <button onclick="addFriend()">Добавить</button>
+
+      <!-- Вкладка Настройки -->
+      <div id="settingsView" class="view">
+        <h2>Настройки профиля</h2>
+        <p style="color:#b9bbbe; margin-bottom: 10px;">Выберите аватарку:</p>
+        <div id="avatarGrid"></div>
       </div>
-      <div id="friendsList"></div>
     </div>
+  </div>
+
+  <!-- Профиль -->
+  <div id="profileButton">
+    <div class="avatar" id="profileAvatarSmall"></div>
+    <span class="name" id="profileNameSmall"></span>
+  </div>
+  <div id="profileMenu">
+    <div class="header">
+      <div class="avatar" id="profileAvatarLarge"></div>
+      <div class="info">
+        <div class="nickname" id="profileNickname"></div>
+        <div class="date" id="profileDate"></div>
+      </div>
+    </div>
+    <div class="code-block" id="profileCode" title="Нажмите, чтобы скопировать"></div>
   </div>
 
   <!-- Входящий звонок -->
@@ -442,7 +615,7 @@
     <button class="reject" onclick="rejectCall()">Отклонить</button>
   </div>
 
-  <!-- Видео (появляется только при звонке) -->
+  <!-- Видео контейнер -->
   <div id="videoContainer">
     <video id="localVideo" autoplay muted></video>
     <video id="remoteVideo" autoplay></video>
