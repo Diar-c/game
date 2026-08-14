@@ -37,10 +37,14 @@ let authMode = 'login'; // 'login' или 'register'
 // ==================== АУТЕНТИФИКАЦИЯ ====================
 auth.onAuthStateChanged((user) => {
   if (user) {
+    // Пользователь вошёл
     myId = user.uid;
-    document.getElementById('loginBtn').style.display = 'none';
+    document.getElementById('topBar').style.display = 'flex';
+    document.getElementById('mainContainer').style.display = 'flex';
+    document.getElementById('friendsPanel').style.display = 'flex';
+    document.getElementById('authModal').style.display = 'none';
     document.getElementById('logoutBtn').style.display = 'block';
-    hideAuthModal();
+
     // Загружаем профиль
     database.ref(`users/${myId}`).once('value').then(snap => {
       const data = snap.val();
@@ -64,29 +68,41 @@ auth.onAuthStateChanged((user) => {
       setupCalls();
     });
   } else {
-    document.getElementById('loginBtn').style.display = 'block';
+    // Пользователь вышел или ещё не вошёл
+    myId = null;
+    document.getElementById('topBar').style.display = 'none';
+    document.getElementById('mainContainer').style.display = 'none';
+    document.getElementById('friendsPanel').style.display = 'none';
+    document.getElementById('authModal').style.display = 'flex'; // показываем окно входа
     document.getElementById('logoutBtn').style.display = 'none';
-    // Очищаем игроков
+
+    // Очищаем данные
     if (myId) {
       database.ref(`players/${myId}`).remove();
       database.ref(`friends/${myId}`).off();
       database.ref(`friendRequests/${myId}`).off();
       database.ref(`calls/${myId}`).off();
     }
+    // Сбрасываем переменные
+    localStream = null;
+    peerConnection = null;
+    currentCall = null;
+    incomingCallData = null;
+    document.getElementById('videoContainer').style.display = 'none';
   }
 });
 
-function showLogin() {
-  document.getElementById('authModal').style.display = 'flex';
-}
+// ==================== ФУНКЦИИ АВТОРИЗАЦИИ ====================
 function hideAuthModal() {
   document.getElementById('authModal').style.display = 'none';
 }
+
 function toggleAuthMode() {
   authMode = authMode === 'login' ? 'register' : 'login';
   document.getElementById('authTitle').textContent = authMode === 'login' ? 'Вход' : 'Регистрация';
   document.getElementById('authSubmitBtn').textContent = authMode === 'login' ? 'Войти' : 'Создать аккаунт';
 }
+
 function handleAuth() {
   const email = document.getElementById('emailInput').value;
   const password = document.getElementById('passwordInput').value;
@@ -96,6 +112,7 @@ function handleAuth() {
     auth.createUserWithEmailAndPassword(email, password).catch(err => alert(err.message));
   }
 }
+
 function logout() {
   auth.signOut();
 }
@@ -272,6 +289,7 @@ async function startCall(friendId, friendName) {
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
     document.getElementById('localVideo').srcObject = localStream;
+    document.getElementById('videoContainer').style.display = 'flex';
   } catch (err) {
     alert('Нет доступа к микрофону/камере');
     return;
@@ -301,6 +319,7 @@ function acceptCall() {
     .then(stream => {
       localStream = stream;
       document.getElementById('localVideo').srcObject = stream;
+      document.getElementById('videoContainer').style.display = 'flex';
       database.ref(`calls/${myId}/${incomingCallData.callId}`).update({ status: 'accepted' });
       createPeerConnection(incomingCallData.callerId, incomingCallData.callId, false);
     })
