@@ -27,18 +27,20 @@ const players = {};
 let myX = 100, myY = 100;
 const keys = {};
 
-// WebRTC
 let localStream = null;
 let peerConnection = null;
-let currentCall = null; // { id, name }
+let currentCall = null;
 let incomingCallData = null;
+
+let authMode = 'login'; // 'login' или 'register'
 
 // ==================== АУТЕНТИФИКАЦИЯ ====================
 auth.onAuthStateChanged((user) => {
   if (user) {
     myId = user.uid;
-    document.getElementById('authPanel').style.display = 'none';
-    document.getElementById('friendsPanel').style.display = 'block';
+    document.getElementById('loginBtn').style.display = 'none';
+    document.getElementById('logoutBtn').style.display = 'block';
+    hideAuthModal();
     // Загружаем профиль
     database.ref(`users/${myId}`).once('value').then(snap => {
       const data = snap.val();
@@ -50,7 +52,6 @@ auth.onAuthStateChanged((user) => {
         myName = `Гость_${myId.slice(0,4)}`;
         myColor = getRandomColor();
         myFriendCode = generateFriendCode();
-        // Создаём профиль
         database.ref(`users/${myId}`).set({
           name: myName,
           color: myColor,
@@ -63,28 +64,44 @@ auth.onAuthStateChanged((user) => {
       setupCalls();
     });
   } else {
-    document.getElementById('authPanel').style.display = 'flex';
-    document.getElementById('friendsPanel').style.display = 'none';
+    document.getElementById('loginBtn').style.display = 'block';
+    document.getElementById('logoutBtn').style.display = 'none';
+    // Очищаем игроков
+    if (myId) {
+      database.ref(`players/${myId}`).remove();
+      database.ref(`friends/${myId}`).off();
+      database.ref(`friendRequests/${myId}`).off();
+      database.ref(`calls/${myId}`).off();
+    }
   }
 });
 
-// ==================== РЕГИСТРАЦИЯ / ВХОД ====================
-function register() {
-  const email = document.getElementById('emailInput').value;
-  const password = document.getElementById('passwordInput').value;
-  auth.createUserWithEmailAndPassword(email, password)
-    .catch(err => alert(err.message));
+function showLogin() {
+  document.getElementById('authModal').style.display = 'flex';
 }
-function login() {
+function hideAuthModal() {
+  document.getElementById('authModal').style.display = 'none';
+}
+function toggleAuthMode() {
+  authMode = authMode === 'login' ? 'register' : 'login';
+  document.getElementById('authTitle').textContent = authMode === 'login' ? 'Вход' : 'Регистрация';
+  document.getElementById('authSubmitBtn').textContent = authMode === 'login' ? 'Войти' : 'Создать аккаунт';
+}
+function handleAuth() {
   const email = document.getElementById('emailInput').value;
   const password = document.getElementById('passwordInput').value;
-  auth.signInWithEmailAndPassword(email, password)
-    .catch(err => alert(err.message));
+  if (authMode === 'login') {
+    auth.signInWithEmailAndPassword(email, password).catch(err => alert(err.message));
+  } else {
+    auth.createUserWithEmailAndPassword(email, password).catch(err => alert(err.message));
+  }
+}
+function logout() {
+  auth.signOut();
 }
 
-// ==================== ИГРОВАЯ ЧАСТЬ (перемещение, чат) ====================
+// ==================== ИГРОВАЯ ЧАСТЬ ====================
 function setupGame() {
-  // Записываем себя в players
   database.ref(`players/${myId}`).set({
     name: myName,
     x: myX,
@@ -93,15 +110,13 @@ function setupGame() {
   });
   database.ref(`players/${myId}`).onDisconnect().remove();
 
-  // Слушаем игроков
   database.ref('players').on('value', snapshot => {
     const data = snapshot.val();
     for (const id in players) if (id !== myId) delete players[id];
     if (data) for (const id in data) if (id !== myId) players[id] = data[id];
   });
 
-  // Слушаем общий чат
-  database.ref('messages').limitToLast(20).on('child_added', snap => {
+  database.ref('messages').limitToLast(50).on('child_added', snap => {
     const msg = snap.val();
     addMessage(`${msg.name}: ${msg.text}`);
   });
@@ -109,7 +124,6 @@ function setupGame() {
   startGameLoop();
 }
 
-// Движение и отрисовка (как раньше, без изменений)
 window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
 window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
@@ -141,7 +155,11 @@ function draw() {
 }
 
 function startGameLoop() {
-  function loop() { updatePosition(); draw(); requestAnimationFrame(loop); }
+  function loop() {
+    updatePosition();
+    draw();
+    requestAnimationFrame(loop);
+  }
   loop();
 }
 
@@ -152,7 +170,6 @@ function addMessage(text) {
   document.getElementById('messages').scrollTop = 999999;
 }
 
-// Отправка сообщения в общий чат
 document.getElementById('chatForm').addEventListener('submit', e => {
   e.preventDefault();
   const text = document.getElementById('chatInput').value.trim();
@@ -169,13 +186,15 @@ document.getElementById('chatForm').addEventListener('submit', e => {
 
 // ==================== ДРУЗЬЯ ====================
 function setupFriends() {
-  // Слушаем входящие запросы
   database.ref(`friendRequests/${myId}`).on('child_added', snap => {
     const request = snap.val();
-    showIncomingRequest(snap.key, request);
+    if (confirm(`${request.name} хочет добавить вас в друзья. Принять?`)) {
+      database.ref(`friends/${myId}/${snap.key}`).set({ name: request.name });
+      database.ref(`friends/${snap.key}/${myId}`).set({ name: myName });
+    }
+    database.ref(`friendRequests/${myId}/${snap.key}`).remove();
   });
 
-  // Слушаем список друзей
   database.ref(`friends/${myId}`).on('value', snap => {
     const data = snap.val();
     const listDiv = document.getElementById('friendsList');
@@ -186,9 +205,11 @@ function setupFriends() {
         const friendItem = document.createElement('div');
         friendItem.className = 'friend-item';
         friendItem.innerHTML = `
-          <span>${friendName}</span>
-          <button class="msg-btn" onclick="startPrivateChat('${friendId}','${friendName}')">💬</button>
-          <button class="call-btn" onclick="startCall('${friendId}','${friendName}')">📞</button>
+          <span class="name">${friendName}</span>
+          <div class="actions">
+            <button onclick="startPrivateChat('${friendId}','${friendName}')">💬</button>
+            <button onclick="startCall('${friendId}','${friendName}')">📞</button>
+          </div>
         `;
         listDiv.appendChild(friendItem);
       }
@@ -203,13 +224,11 @@ function generateFriendCode() {
 function addFriend() {
   const code = document.getElementById('addFriendInput').value.trim().toUpperCase();
   if (!code) return;
-  // Ищем пользователя по коду
   database.ref('users').orderByChild('friendCode').equalTo(code).once('value')
     .then(snapshot => {
       if (snapshot.exists()) {
         const friendId = Object.keys(snapshot.val())[0];
         const friendName = snapshot.val()[friendId].name;
-        // Отправляем запрос
         database.ref(`friendRequests/${friendId}/${myId}`).set({
           name: myName,
           timestamp: firebase.database.ServerValue.TIMESTAMP
@@ -221,20 +240,8 @@ function addFriend() {
     });
 }
 
-function showIncomingRequest(requestId, request) {
-  // Показываем уведомление (можно заменить на alert или модальное окно)
-  if (confirm(`${request.name} хочет добавить вас в друзья. Принять?`)) {
-    // Принимаем
-    database.ref(`friends/${myId}/${requestId}`).set({ name: request.name });
-    database.ref(`friends/${requestId}/${myId}`).set({ name: myName });
-  }
-  database.ref(`friendRequests/${myId}/${requestId}`).remove();
-}
-
-// ==================== ЛИЧНЫЕ СООБЩЕНИЯ ====================
 function startPrivateChat(friendId, friendName) {
   const friendKey = [myId, friendId].sort().join('_');
-  // Простейший вариант: используем prompt для ввода сообщения
   const message = prompt(`Сообщение для ${friendName}:`);
   if (message) {
     database.ref(`privateMessages/${friendKey}`).push({
@@ -247,9 +254,8 @@ function startPrivateChat(friendId, friendName) {
   }
 }
 
-// ==================== ЗВОНКИ (WebRTC) ====================
+// ==================== ЗВОНКИ ====================
 function setupCalls() {
-  // Слушаем входящие звонки
   database.ref(`calls/${myId}`).on('value', snap => {
     const data = snap.val();
     if (data && data.status === 'ringing') {
@@ -263,7 +269,6 @@ function setupCalls() {
 }
 
 async function startCall(friendId, friendName) {
-  // Запрашиваем доступ к медиа
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
     document.getElementById('localVideo').srcObject = localStream;
@@ -272,7 +277,6 @@ async function startCall(friendId, friendName) {
     return;
   }
 
-  // Создаём звонок в БД
   const callRef = database.ref(`calls/${friendId}`).push();
   const callId = callRef.key;
   currentCall = { id: callId, friendId, friendName };
@@ -283,7 +287,6 @@ async function startCall(friendId, friendName) {
     timestamp: firebase.database.ServerValue.TIMESTAMP
   });
 
-  // Слушаем ответ друга
   database.ref(`calls/${friendId}/${callId}`).on('value', snap => {
     const data = snap.val();
     if (data && data.status === 'accepted') {
@@ -294,12 +297,10 @@ async function startCall(friendId, friendName) {
 
 function acceptCall() {
   if (!incomingCallData) return;
-  // Запрашиваем медиа
   navigator.mediaDevices.getUserMedia({ audio: true, video: true })
     .then(stream => {
       localStream = stream;
       document.getElementById('localVideo').srcObject = stream;
-      // Обновляем статус звонка
       database.ref(`calls/${myId}/${incomingCallData.callId}`).update({ status: 'accepted' });
       createPeerConnection(incomingCallData.callerId, incomingCallData.callId, false);
     })
@@ -320,7 +321,6 @@ function createPeerConnection(remoteId, callId, isCaller) {
   });
   peerConnection = pc;
 
-  // Добавляем локальные треки
   localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
 
   pc.ontrack = (event) => {
@@ -333,7 +333,6 @@ function createPeerConnection(remoteId, callId, isCaller) {
     }
   };
 
-  // Если инициатор — создаём оффер
   if (isCaller) {
     pc.createOffer().then(offer => {
       pc.setLocalDescription(offer);
@@ -341,12 +340,10 @@ function createPeerConnection(remoteId, callId, isCaller) {
     });
   }
 
-  // Слушаем ICE кандидатов от собеседника
   database.ref(`calls/${myId}/${callId}/iceCandidates`).on('child_added', snap => {
     pc.addIceCandidate(new RTCIceCandidate(snap.val()));
   });
 
-  // Если отвечающий — ждём offer
   if (!isCaller) {
     database.ref(`calls/${myId}/${callId}`).on('value', snap => {
       const data = snap.val();
