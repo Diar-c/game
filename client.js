@@ -22,7 +22,7 @@ canvas.height = canvas.parentElement.clientHeight;
 let myId = null;
 let myName = 'Гость';
 let myColor = '#ffcc00';
-let myAvatar = '😀';
+let myAvatar = '😀'; // Может быть emoji или data URL
 let myFriendCode = null;
 let myCreatedAt = null;
 const players = {};
@@ -31,7 +31,7 @@ const keys = {};
 
 let localStream = null;
 let peerConnection = null;
-let currentCall = null;
+let currentCall = null; // { id, friendId, friendName }
 let incomingCallData = null;
 
 let authMode = 'login';
@@ -40,7 +40,6 @@ let currentChat = 'general'; // 'general' или friendId
 let currentFriendId = null;
 let currentFriendName = null;
 
-// Список доступных аватарок
 const avatarOptions = ['😀', '😎', '🤖', '👽', '🐱', '🦊', '🐼', '🐸', '🐙', '🦄'];
 
 // ==================== АУТЕНТИФИКАЦИЯ ====================
@@ -53,7 +52,6 @@ auth.onAuthStateChanged((user) => {
     document.getElementById('logoutBtn').style.display = 'block';
     document.getElementById('profileButton').style.display = 'flex';
 
-    // Загружаем/создаём профиль
     database.ref(`users/${myId}`).once('value').then(snap => {
       const data = snap.val();
       if (data) {
@@ -82,7 +80,6 @@ auth.onAuthStateChanged((user) => {
       setupCalls();
       buildChatList();
       buildAvatarGrid();
-      // По умолчанию открываем общий чат
       openChat('general');
     });
   } else {
@@ -93,7 +90,6 @@ auth.onAuthStateChanged((user) => {
     document.getElementById('logoutBtn').style.display = 'none';
     document.getElementById('profileButton').style.display = 'none';
     document.getElementById('profileMenu').style.display = 'none';
-    // Сброс
     if (myId) {
       database.ref(`players/${myId}`).remove();
       database.ref(`friends/${myId}`).off();
@@ -128,19 +124,30 @@ function logout() {
 
 // ==================== ПРОФИЛЬ ====================
 function updateProfileUI() {
-  document.getElementById('profileAvatarSmall').textContent = myAvatar;
+  const smallAvatar = document.getElementById('profileAvatarSmall');
+  const largeAvatar = document.getElementById('profileAvatarLarge');
+  setAvatarDisplay(smallAvatar, myAvatar);
+  setAvatarDisplay(largeAvatar, myAvatar);
   document.getElementById('profileNameSmall').textContent = myName;
-  document.getElementById('profileAvatarLarge').textContent = myAvatar;
   document.getElementById('profileNickname').textContent = myName;
   document.getElementById('profileDate').textContent = `Регистрация: ${new Date(myCreatedAt).toLocaleDateString()}`;
   document.getElementById('profileCode').textContent = `Код: ${myFriendCode}`;
+  document.getElementById('nicknameInput').value = myName;
 }
-// Клик по кнопке профиля
+
+// Вспомогательная функция для отображения аватарки (emoji или изображение)
+function setAvatarDisplay(element, avatar) {
+  if (avatar.startsWith('data:image')) {
+    element.innerHTML = `<img src="${avatar}" alt="avatar">`;
+  } else {
+    element.textContent = avatar; // emoji
+  }
+}
+
 document.getElementById('profileButton').addEventListener('click', () => {
   const menu = document.getElementById('profileMenu');
   menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
 });
-// Клик по коду — копирование
 document.getElementById('profileCode').addEventListener('click', () => {
   navigator.clipboard.writeText(myFriendCode);
   alert('Код скопирован!');
@@ -149,8 +156,7 @@ document.getElementById('profileCode').addEventListener('click', () => {
 // ==================== ПЕРЕКЛЮЧЕНИЕ ВКЛАДОК ====================
 document.querySelectorAll('.sidebar-icon').forEach(icon => {
   icon.addEventListener('click', () => {
-    const view = icon.dataset.view;
-    switchView(view);
+    switchView(icon.dataset.view);
   });
 });
 function switchView(view) {
@@ -160,12 +166,8 @@ function switchView(view) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById(`${view}View`).classList.add('active');
   if (view === 'chats') {
-    // При возврате на чаты показываем текущий чат
-    if (currentChat === 'general') {
-      openChat('general');
-    } else {
-      openChat(currentFriendId);
-    }
+    if (currentChat === 'general') openChat('general');
+    else openChat(currentFriendId, currentFriendName);
   }
 }
 
@@ -188,7 +190,7 @@ function setupGame() {
 
   database.ref('messages').limitToLast(50).on('child_added', snap => {
     const msg = snap.val();
-    addGeneralMessage(`${msg.name}: ${msg.text}`);
+    addGeneralMessage(msg);
   });
 
   startGameLoop();
@@ -204,8 +206,8 @@ function updatePosition() {
   if (keys['arrowright'] || keys['d']) { myX += speed; moved = true; }
   if (keys['arrowup'] || keys['w']) { myY -= speed; moved = true; }
   if (keys['arrowdown'] || keys['s']) { myY += speed; moved = true; }
-  myX = Math.max(0, Math.min(canvas.width - 20, myX));
-  myY = Math.max(0, Math.min(canvas.height - 20, myY));
+  myX = Math.max(0, Math.min(canvas.width - 30, myX));
+  myY = Math.max(0, Math.min(canvas.height - 30, myY));
   if (moved && myId) {
     database.ref(`players/${myId}`).update({ x: myX, y: myY });
   }
@@ -220,7 +222,9 @@ function draw() {
     ctx.fillStyle = '#fff';
     ctx.font = '14px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(p.avatar || '😀', p.x + 15, p.y + 20);
+    // Если аватарка - изображение, показываем первую букву имени
+    const avatarText = (p.avatar && !p.avatar.startsWith('data:image')) ? p.avatar : p.name[0];
+    ctx.fillText(avatarText, p.x + 15, p.y + 20);
     ctx.fillText(p.name, p.x + 15, p.y - 5);
   }
 }
@@ -234,11 +238,25 @@ function startGameLoop() {
   loop();
 }
 
-function addGeneralMessage(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  document.getElementById('generalMessages').appendChild(div);
-  document.getElementById('generalMessages').scrollTop = 999999;
+// ==================== СООБЩЕНИЯ ====================
+function addGeneralMessage(msg) {
+  const messagesDiv = document.getElementById('generalMessages');
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'message';
+  const avatarSpan = document.createElement('div');
+  avatarSpan.className = 'msg-avatar';
+  setAvatarDisplay(avatarSpan, msg.avatar || '😀');
+  const bodyDiv = document.createElement('div');
+  bodyDiv.className = 'msg-body';
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'msg-name';
+  nameSpan.textContent = msg.name + ':';
+  bodyDiv.appendChild(nameSpan);
+  bodyDiv.appendChild(document.createTextNode(' ' + msg.text));
+  messageDiv.appendChild(avatarSpan);
+  messageDiv.appendChild(bodyDiv);
+  messagesDiv.appendChild(messageDiv);
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
 
 document.getElementById('generalChatForm').addEventListener('submit', e => {
@@ -248,6 +266,7 @@ document.getElementById('generalChatForm').addEventListener('submit', e => {
     database.ref('messages').push({
       userId: myId,
       name: myName,
+      avatar: myAvatar,
       text: text,
       timestamp: firebase.database.ServerValue.TIMESTAMP
     });
@@ -259,17 +278,14 @@ document.getElementById('generalChatForm').addEventListener('submit', e => {
 function buildChatList() {
   const chatList = document.getElementById('chatList');
   chatList.innerHTML = '';
-  // Общий чат
   const generalItem = document.createElement('div');
   generalItem.className = 'chat-item' + (currentChat === 'general' ? ' active' : '');
   generalItem.textContent = 'Общий чат';
   generalItem.onclick = () => openChat('general');
   chatList.appendChild(generalItem);
 
-  // Личные чаты (для каждого друга)
   database.ref(`friends/${myId}`).on('value', snap => {
     const data = snap.val();
-    // Удаляем старые личные чаты
     const existing = chatList.querySelectorAll('.chat-item.private');
     existing.forEach(el => el.remove());
     if (data) {
@@ -286,44 +302,52 @@ function buildChatList() {
 }
 
 function openChat(chatId, friendName = null) {
-  // Сброс активных классов
   document.querySelectorAll('.chat-item').forEach(el => el.classList.remove('active'));
-  // Выделяем нужный элемент
-  const chatItems = document.querySelectorAll('.chat-item');
   if (chatId === 'general') {
     currentChat = 'general';
-    chatItems[0]?.classList.add('active'); // первый - общий
     document.getElementById('generalChat').style.display = 'flex';
     document.getElementById('privateChat').style.display = 'none';
+    const firstItem = document.querySelector('#chatList .chat-item');
+    if (firstItem) firstItem.classList.add('active');
   } else {
     currentChat = chatId;
     currentFriendId = chatId;
     currentFriendName = friendName;
-    // Найти элемент по id друга
-    chatItems.forEach(el => {
-      if (el.textContent.includes(friendName)) el.classList.add('active');
-    });
     document.getElementById('generalChat').style.display = 'none';
     document.getElementById('privateChat').style.display = 'flex';
     document.getElementById('privateChatHeader').textContent = `Личный чат с ${friendName}`;
-    // Очищаем сообщения
     document.getElementById('privateMessages').innerHTML = '';
-    // Подписываемся на личные сообщения
     const friendKey = [myId, chatId].sort().join('_');
-    database.ref(`privateMessages/${friendKey}`).off(); // снимаем старый слушатель
+    database.ref(`privateMessages/${friendKey}`).off();
     database.ref(`privateMessages/${friendKey}`).limitToLast(50).on('child_added', snap => {
       const msg = snap.val();
-      const sender = msg.from === myId ? 'Вы' : friendName;
-      addPrivateMessage(`${sender}: ${msg.text}`);
+      addPrivateMessage(msg, friendName);
+    });
+    document.querySelectorAll('#chatList .chat-item.private').forEach(el => {
+      if (el.textContent.includes(friendName)) el.classList.add('active');
     });
   }
 }
 
-function addPrivateMessage(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  document.getElementById('privateMessages').appendChild(div);
-  document.getElementById('privateMessages').scrollTop = 999999;
+function addPrivateMessage(msg, friendName) {
+  const messagesDiv = document.getElementById('privateMessages');
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'message';
+  const avatarSpan = document.createElement('div');
+  avatarSpan.className = 'msg-avatar';
+  setAvatarDisplay(avatarSpan, msg.avatar || '😀');
+  const bodyDiv = document.createElement('div');
+  bodyDiv.className = 'msg-body';
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'msg-name';
+  const senderName = msg.from === myId ? 'Вы' : friendName;
+  nameSpan.textContent = senderName + ':';
+  bodyDiv.appendChild(nameSpan);
+  bodyDiv.appendChild(document.createTextNode(' ' + msg.text));
+  messageDiv.appendChild(avatarSpan);
+  messageDiv.appendChild(bodyDiv);
+  messagesDiv.appendChild(messageDiv);
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
 }
 
 document.getElementById('privateChatForm').addEventListener('submit', e => {
@@ -335,6 +359,7 @@ document.getElementById('privateChatForm').addEventListener('submit', e => {
       from: myId,
       to: currentFriendId,
       fromName: myName,
+      avatar: myAvatar,
       text: text,
       timestamp: firebase.database.ServerValue.TIMESTAMP
     });
@@ -344,7 +369,6 @@ document.getElementById('privateChatForm').addEventListener('submit', e => {
 
 // ==================== ДРУЗЬЯ ====================
 function setupFriends() {
-  // Слушаем входящие запросы
   database.ref(`friendRequests/${myId}`).on('child_added', snap => {
     const request = snap.val();
     if (confirm(`${request.name} хочет добавить вас в друзья. Принять?`)) {
@@ -354,7 +378,6 @@ function setupFriends() {
     database.ref(`friendRequests/${myId}/${snap.key}`).remove();
   });
 
-  // Слушаем список друзей и обновляем вкладку "Друзья"
   database.ref(`friends/${myId}`).on('value', snap => {
     const data = snap.val();
     const listDiv = document.getElementById('friendsList');
@@ -400,7 +423,7 @@ function addFriend() {
     });
 }
 
-// ==================== НАСТРОЙКИ (АВАТАРКА) ====================
+// ==================== НАСТРОЙКИ ====================
 function buildAvatarGrid() {
   const grid = document.getElementById('avatarGrid');
   grid.innerHTML = '';
@@ -413,14 +436,52 @@ function buildAvatarGrid() {
       database.ref(`users/${myId}`).update({ avatar: avatar });
       database.ref(`players/${myId}`).update({ avatar: avatar });
       updateProfileUI();
-      buildAvatarGrid(); // перерисовать
+      buildAvatarGrid();
     };
     grid.appendChild(div);
   });
+
+  // Кнопка загрузки
+  const uploadBtn = document.getElementById('uploadAvatarBtn');
+  uploadBtn.onclick = () => {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'image/*';
+    fileInput.onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      if (file.size > 500 * 1024) {
+        alert('Файл слишком большой. Максимум 500 КБ.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const dataUrl = event.target.result;
+        myAvatar = dataUrl;
+        database.ref(`users/${myId}`).update({ avatar: dataUrl });
+        database.ref(`players/${myId}`).update({ avatar: dataUrl });
+        updateProfileUI();
+        buildAvatarGrid();
+      };
+      reader.readAsDataURL(file);
+    };
+    fileInput.click();
+  };
 }
 
-// ==================== ЗВОНКИ ====================
+function changeNickname() {
+  const newNick = document.getElementById('nicknameInput').value.trim();
+  if (!newNick) return;
+  myName = newNick;
+  database.ref(`users/${myId}`).update({ name: newNick });
+  database.ref(`players/${myId}`).update({ name: newNick });
+  updateProfileUI();
+  alert('Ник изменён!');
+}
+
+// ==================== ЗВОНКИ (Discord-like) ====================
 function setupCalls() {
+  // Слушаем входящие звонки
   database.ref(`calls/${myId}`).on('value', snap => {
     const data = snap.val();
     if (data && data.status === 'ringing') {
@@ -431,17 +492,27 @@ function setupCalls() {
       document.getElementById('incomingCall').style.display = 'none';
     }
   });
+
+  // Слушаем завершение звонка (удаление записи)
+  database.ref(`calls/${myId}`).on('child_removed', snap => {
+    if (currentCall && snap.key === currentCall.id) {
+      endCallUI();
+    }
+  });
 }
 
 async function startCall(friendId, friendName) {
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-    document.getElementById('localVideo').srcObject = localStream;
-    document.getElementById('videoContainer').style.display = 'flex';
   } catch (err) {
     alert('Нет доступа к микрофону/камере');
     return;
   }
+
+  // Показываем окно звонка
+  document.getElementById('localVideo').srcObject = localStream;
+  document.getElementById('callPanel').style.display = 'flex';
+  document.getElementById('incomingCall').style.display = 'none';
 
   const callRef = database.ref(`calls/${friendId}`).push();
   const callId = callRef.key;
@@ -453,10 +524,13 @@ async function startCall(friendId, friendName) {
     timestamp: firebase.database.ServerValue.TIMESTAMP
   });
 
+  // Ожидаем ответа
   database.ref(`calls/${friendId}/${callId}`).on('value', snap => {
     const data = snap.val();
     if (data && data.status === 'accepted') {
       createPeerConnection(friendId, callId, true);
+    } else if (data && data.status === 'rejected') {
+      endCallUI();
     }
   });
 }
@@ -467,8 +541,10 @@ function acceptCall() {
     .then(stream => {
       localStream = stream;
       document.getElementById('localVideo').srcObject = stream;
-      document.getElementById('videoContainer').style.display = 'flex';
+      document.getElementById('callPanel').style.display = 'flex';
+      document.getElementById('incomingCall').style.display = 'none';
       database.ref(`calls/${myId}/${incomingCallData.callId}`).update({ status: 'accepted' });
+      currentCall = { id: incomingCallData.callId, friendId: incomingCallData.callerId, friendName: incomingCallData.callerName };
       createPeerConnection(incomingCallData.callerId, incomingCallData.callId, false);
     })
     .catch(err => alert('Нет доступа к медиа'));
@@ -479,6 +555,54 @@ function rejectCall() {
     database.ref(`calls/${myId}/${incomingCallData.callId}`).update({ status: 'rejected' });
     database.ref(`calls/${myId}/${incomingCallData.callId}`).remove();
     incomingCallData = null;
+  }
+}
+
+function endCall() {
+  if (currentCall) {
+    // Если мы инициатор, удаляем запись; если получатель, просто обновляем статус
+    if (currentCall.friendId) {
+      database.ref(`calls/${currentCall.friendId}/${currentCall.id}`).remove();
+    }
+    database.ref(`calls/${myId}/${currentCall.id}`).remove();
+  }
+  endCallUI();
+}
+
+function endCallUI() {
+  document.getElementById('callPanel').style.display = 'none';
+  document.getElementById('incomingCall').style.display = 'none';
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+    localStream = null;
+  }
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+  document.getElementById('localVideo').srcObject = null;
+  document.getElementById('remoteVideo').srcObject = null;
+  currentCall = null;
+  incomingCallData = null;
+}
+
+function toggleMute() {
+  if (localStream) {
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (audioTrack) {
+      audioTrack.enabled = !audioTrack.enabled;
+      document.getElementById('muteBtn').textContent = audioTrack.enabled ? '🎙️' : '🔇';
+    }
+  }
+}
+
+function toggleCamera() {
+  if (localStream) {
+    const videoTrack = localStream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.enabled = !videoTrack.enabled;
+      document.getElementById('cameraBtn').textContent = videoTrack.enabled ? '📷' : '🚫';
+    }
   }
 }
 
