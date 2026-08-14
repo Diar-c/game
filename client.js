@@ -29,12 +29,12 @@ const players = {};
 let myX = 100, myY = 100;
 const keys = {};
 
-// WebRTC
 let localStream = null;
 let peerConnection = null;
-let currentCall = null;          // { id, friendId, friendName, status, timeout }
-let incomingCallData = null;     // { callId, callerId, callerName }
-let ringtoneAudioContext = null; // для звукового сигнала
+let currentCall = null;
+let incomingCallData = null;
+
+let ringtoneAudioContext = null;
 let ringtoneTimer = null;
 
 let authMode = 'login';
@@ -93,7 +93,6 @@ auth.onAuthStateChanged((user) => {
     document.getElementById('logoutBtn').style.display = 'none';
     document.getElementById('profileButton').style.display = 'none';
     document.getElementById('profileMenu').style.display = 'none';
-    // Очистка при выходе
     if (myId) {
       database.ref(`players/${myId}`).remove();
       database.ref(`friends/${myId}`).off();
@@ -502,9 +501,22 @@ function changeNickname() {
   alert('Ник изменён!');
 }
 
-// ==================== ЗВОНКИ (Discord-like улучшенные) ====================
+// ==================== ЗВОНКИ (улучшенные) ====================
 
-// Звуковой сигнал (имитация гудков)
+// Функция проверки поддержки WebRTC и secure context
+function checkCallSupport() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert('Ваш браузер не поддерживает звонки (WebRTC). Обновите браузер.');
+    return false;
+  }
+  if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    alert('Для звонков сайт должен быть открыт через HTTPS или localhost.\nСейчас протокол: ' + window.location.protocol);
+    return false;
+  }
+  return true;
+}
+
+// Звуковой сигнал
 function playRingtone() {
   if (ringtoneAudioContext) return;
   ringtoneAudioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -521,7 +533,7 @@ function playRingtone() {
     setTimeout(() => {
       oscillator.stop();
       if (ringtoneTimer) {
-        ringtoneTimer = setTimeout(beep, 1500); // пауза между гудками
+        ringtoneTimer = setTimeout(beep, 1500);
       }
     }, 500);
   };
@@ -539,18 +551,12 @@ function stopRingtone() {
   }
 }
 
-// Установка статуса звонка (обновляет текст в UI)
 function updateCallStatus(text) {
   const statusElement = document.getElementById('callStatus');
   if (statusElement) statusElement.textContent = text;
-  else {
-    // Если элемента нет, выводим в заголовок окна звонка
-    const callPanel = document.getElementById('callPanel');
-    if (callPanel) callPanel.setAttribute('data-status', text);
-  }
 }
 
-// Проверка, онлайн ли пользователь (есть ли запись в players)
+// Проверка, онлайн ли пользователь
 function isUserOnline(userId) {
   return new Promise((resolve) => {
     database.ref(`players/${userId}`).once('value')
@@ -561,18 +567,37 @@ function isUserOnline(userId) {
 
 // Запуск звонка (инициатор)
 async function startCall(friendId, friendName) {
-  // Проверяем, онлайн ли друг
+  if (!checkCallSupport()) return;
+
   const online = await isUserOnline(friendId);
   if (!online) {
     alert(`${friendName} сейчас не в сети. Звонок невозможен.`);
     return;
   }
 
-  // Запрашиваем медиа
+  // Запрашиваем медиа с подробной обработкой ошибок
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
   } catch (err) {
-    alert('Нет доступа к микрофону/камере. Проверьте разрешения.');
+    console.error('Ошибка getUserMedia:', err);
+    let message = 'Не удалось получить доступ к микрофону/камере.\n\n';
+    switch (err.name) {
+      case 'NotAllowedError':
+        message += 'Доступ запрещён. Разрешите доступ в браузере (значок замка в адресной строке).';
+        break;
+      case 'NotFoundError':
+        message += 'Не найдено устройство. Подключите микрофон/камеру.';
+        break;
+      case 'NotReadableError':
+        message += 'Устройство занято другой программой. Закройте другие приложения, использующие камеру/микрофон.';
+        break;
+      case 'SecurityError':
+        message += 'Сайт открыт не через HTTPS. Используйте HTTPS или localhost.';
+        break;
+      default:
+        message += 'Код ошибки: ' + err.name;
+    }
+    alert(message);
     return;
   }
 
@@ -582,7 +607,6 @@ async function startCall(friendId, friendName) {
   document.getElementById('incomingCall').style.display = 'none';
   updateCallStatus('Звонит...');
 
-  // Создаём запись звонка в базе
   const callRef = database.ref(`calls/${friendId}`).push();
   const callId = callRef.key;
   currentCall = { id: callId, friendId, friendName, status: 'ringing' };
@@ -593,10 +617,8 @@ async function startCall(friendId, friendName) {
     timestamp: firebase.database.ServerValue.TIMESTAMP
   });
 
-  // Таймер на случай, если не ответят за 30 секунд
   const timeout = setTimeout(() => {
     if (currentCall && currentCall.status === 'ringing') {
-      // Удаляем звонок
       database.ref(`calls/${friendId}/${callId}`).remove();
       database.ref(`calls/${myId}/${callId}`).remove();
       endCallUI();
@@ -605,7 +627,6 @@ async function startCall(friendId, friendName) {
   }, 30000);
   currentCall.timeout = timeout;
 
-  // Слушаем изменения статуса
   database.ref(`calls/${friendId}/${callId}`).on('value', snap => {
     const data = snap.val();
     if (!data) return;
@@ -625,14 +646,21 @@ async function startCall(friendId, friendName) {
 // Принятие входящего звонка
 async function acceptCall() {
   if (!incomingCallData) return;
+  if (!checkCallSupport()) return;
   stopRingtone();
 
   try {
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
   } catch (err) {
-    alert('Нет доступа к микрофону/камере.');
+    console.error('Ошибка getUserMedia:', err);
+    let message = 'Не удалось получить доступ к микрофону/камере.\n\n';
+    if (err.name === 'NotAllowedError') message += 'Доступ запрещён. Разрешите доступ в браузере.';
+    else if (err.name === 'NotFoundError') message += 'Не найдено устройство.';
+    else message += 'Код ошибки: ' + err.name;
+    alert(message);
     database.ref(`calls/${myId}/${incomingCallData.callId}`).update({ status: 'rejected' });
     incomingCallData = null;
+    document.getElementById('incomingCall').style.display = 'none';
     return;
   }
 
@@ -641,10 +669,8 @@ async function acceptCall() {
   document.getElementById('incomingCall').style.display = 'none';
   updateCallStatus('Соединение...');
 
-  // Обновляем статус звонка
   database.ref(`calls/${myId}/${incomingCallData.callId}`).update({ status: 'accepted' });
 
-  // Устанавливаем текущий звонок
   currentCall = {
     id: incomingCallData.callId,
     friendId: incomingCallData.callerId,
@@ -652,12 +678,10 @@ async function acceptCall() {
     status: 'accepted'
   };
 
-  // Создаём peer connection
   createPeerConnection(incomingCallData.callerId, incomingCallData.callId, false);
   incomingCallData = null;
 }
 
-// Отклонение входящего звонка
 function rejectCall() {
   if (incomingCallData) {
     database.ref(`calls/${myId}/${incomingCallData.callId}`).update({ status: 'rejected' });
@@ -668,18 +692,13 @@ function rejectCall() {
   }
 }
 
-// Завершение звонка (любая сторона)
 function endCall() {
   if (currentCall) {
-    // Если мы инициатор, удаляем запись у друга; если получатель - у себя
     if (currentCall.friendId && currentCall.status === 'ringing') {
-      // Если ещё звонит, удаляем у друга
       database.ref(`calls/${currentCall.friendId}/${currentCall.id}`).remove();
     }
-    // Удаляем у себя
     database.ref(`calls/${myId}/${currentCall.id}`).remove();
 
-    // Если есть peer connection, закрываем
     if (peerConnection) {
       peerConnection.close();
       peerConnection = null;
@@ -696,7 +715,6 @@ function endCall() {
   }
 }
 
-// Универсальное завершение UI (вызывается из разных мест)
 function endCallUI() {
   stopRingtone();
   if (localStream) {
@@ -716,7 +734,6 @@ function endCallUI() {
   incomingCallData = null;
 }
 
-// Переключение микрофона
 function toggleMute() {
   if (localStream) {
     const audioTrack = localStream.getAudioTracks()[0];
@@ -727,7 +744,6 @@ function toggleMute() {
   }
 }
 
-// Переключение камеры
 function toggleCamera() {
   if (localStream) {
     const videoTrack = localStream.getVideoTracks()[0];
@@ -738,7 +754,6 @@ function toggleCamera() {
   }
 }
 
-// Создание peer connection
 function createPeerConnection(remoteId, callId, isCaller) {
   const pc = new RTCPeerConnection({
     iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
@@ -787,11 +802,9 @@ function createPeerConnection(remoteId, callId, isCaller) {
 
 // Слушатель входящих звонков и изменений
 function setupCalls() {
-  // Входящие звонки
   database.ref(`calls/${myId}`).on('value', snap => {
     const data = snap.val();
     if (data) {
-      // Если есть звонок со статусом ringing и мы не в звонке
       const entries = Object.entries(data);
       const ringingEntry = entries.find(([key, value]) => value.status === 'ringing');
       if (ringingEntry && !currentCall) {
@@ -804,7 +817,6 @@ function setupCalls() {
         document.getElementById('incomingCall').style.display = 'block';
         playRingtone();
       } else {
-        // Если звонок был принят или отклонён другим способом, скрываем
         document.getElementById('incomingCall').style.display = 'none';
         stopRingtone();
       }
@@ -814,7 +826,6 @@ function setupCalls() {
     }
   });
 
-  // Удаление звонка (когда кто-то завершил)
   database.ref(`calls/${myId}`).on('child_removed', snap => {
     if (currentCall && snap.key === currentCall.id) {
       endCallUI();
